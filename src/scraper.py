@@ -1,8 +1,25 @@
 from dotenv import load_dotenv
 import os
+import lxml
+import urllib3
 import requests
 import psycopg2
 from bs4 import BeautifulSoup 
+
+class Artwork:
+    src = ""
+    alt = ""
+
+    def __init__(self, src, alt):
+        self.src = src
+        self.alt = alt
+
+    def getSrc(self):
+        return self.src
+
+    def getAlt(self):
+        return self.alt
+    
 
 load_dotenv()
 
@@ -14,97 +31,125 @@ conn = psycopg2.connect(
     password = os.getenv('DB_PASSWORD')
 )
 
+conn.autocommit = True
+cursor = conn.cursor()
+cursor.execute("SET client_encoding = 'UTF8'")
 
-def runScraper() :
-    # GET Request
-    URL =  'https://jojowiki.com/Art_Gallery#2021-2025-0'
-    requests_session = requests.Session()
-    page = requests_session.get( URL )  
+# GET Request
+URL =  'https://jojowiki.com/Art_Gallery#1970-1990-0'
+requests_session = requests.Session()
+page = requests_session.get( URL )  
 
-    # Check for successful status code (200)
-    print("Status Code - {}".format(page.status_code))
-     
+# Check for successful status code (200)
+print("Status Code - {}".format(page.status_code))
+    
 
-    # HTML Parser
-    soup = BeautifulSoup(page.text, "lxml")
-    divs = soup.find("div", {"class":"phantom-blood-tabs"})
-    entries = divs.find_all("table", {"class":"diamonds volume"})
+# HTML Parser
+soup = BeautifulSoup(page.text, "lxml")
+divs = soup.find("div", {"class":"phantom-blood-tabs"})
+entries = divs.find_all("table", {"class":"diamonds volume"})
 
-    # Scrapes every artwork entry on the page
-    for entry in entries :
+# Scrapes every artwork entry on the page
+LIMIT = 10
+for entry in entries:
 
-        # Initializes each subsection of an artwork entry, containing:
-            # Artwork      (artworkList)
-            # Date         (date)
-            # Original Use (sourceTitle)
-            # Source Image (sourceImgList)
+    # Initializes each subsection of an artwork entry, containing:
+        # Artwork      (artworkList)
+        # Date         (date)
+        # Original Use (name)
+        # Source Image (sourceImgList)
 
-        sections = entry.find_all("td", {"class":"volume"}) # Subsections are stored in <td> tags with class:"volume"
-        artworkList = []
-        date = ""
-        sourceTitle = ""
-        sourceImgList = []
+    sections = entry.find_all("td", {"class":"volume"}) # Subsections are stored in <td> tags with class:"volume"
 
-
-        sectionCounter = 1 # Tracks which subsection/column is being viewed (sections are referred to as "volumes" within the html)
-        for section in sections :
-
-            # If on a subsection containing images (1 and 4), scrape image content
-            if(sectionCounter == 1 or sectionCounter == 4) :
-                thumbnails = section.find_all("a") # href is stored within <a> tags
-
-                # For every thumbnail image, find full-res webpage and create new 
-                for thumbnail in thumbnails :
-
-                    # Grabs href for full-res image webpage from thumbnail container
-                        # href = /File:ARTORK_NAME
-                    href = thumbnail.get('href') 
-                    newURL = f"https://jojowiki.com{href}" # Appends href to domain to form new url
-
-                    # Temporary HTML parser to scrape full-res image
-                    newRequests_session = requests.Session()
-                    newPage = newRequests_session.get( newURL )  
-                    newSoup = BeautifulSoup(newPage.text, "lxml")
-
-                    media = newSoup.find("a", {"class":"internal"})
-                    src = media.get('href') # Grabs image source-link
-                    alt = media.get('title') # Grabs image alt text
+    artworkList = []
+    date = ""
+    name = ""
+    sourceImgList = []
 
 
-                    if(sectionCounter == 1) :
-                        # Stores in allArtEntries list
-                        artworkObj = Artwork(src, alt) 
-                        artEntryObj.artworkList.append(artworkObj) 
+    for sectionIndex, section in enumerate(sections) :
 
-                        # Stores in CSV
-                        artworkList.append("<src: " + src + "\nalt: " + alt + ">") # Uses <> for separation of entries and ease of possible parsing
+        # If on a subsection containing images (1 and 4), scrape image content
+        if(sectionIndex == 1 or sectionIndex == 4) :
+            thumbnails = section.find_all("a") # href is stored within <a> tags
 
-                    elif(sectionCounter == 4) :
-                        # Stores in allArtEntries list
-                        srcImgObj = Artwork(src, alt) 
-                        artEntryObj.sourceImgList.append(srcImgObj) 
+            # For every thumbnail image, find full-res webpage and create new 
+            for thumbnail in thumbnails :
+                href = thumbnail.get('href')
 
-                        # Stores in CSV
-                        sourceImgList.append("<src: " + src + "\nalt: " + alt + ">") # Uses <> for separation of entries and ease of possible parsing
+                img = thumbnail.find("img")
+                alt = img.get('alt')
+                if(sectionIndex == 1):
+                    artworkList.append(Artwork(href, alt))
+                elif(sectionIndex == 4) :
+                    sourceImgList.append(Artwork(href, alt))
 
-            # If on a subsection containing text (2 and 3), scrape text content
-            elif(sectionCounter == 2 or sectionCounter == 3) :
-                textContent = section.find("center") # Text content is stored within <center> tags
+        # If on a subsection containing text (2 and 3), scrape text content
+        elif(sectionIndex == 2 or sectionIndex == 3) :
+            textContent = section.find("center") # Text content is stored within <center> tags
 
-                for string in textContent.strings :
-                    if(sectionCounter == 2) :
-                        date += string
-                    elif(sectionCounter == 3) :
-                        sourceTitle += string
+            for string in textContent.strings :
+                if(sectionIndex == 2) :
+                    date += string
+                elif(sectionIndex == 3) :
+                    name += string
+    
+    # Check if ARTENTRY exists in database
+        cursor.execute("SELECT id FROM artentry WHERE name = '%s' AND date = '%s';", (name, date))
+        artentryID = cursor.fetchone()
 
-            # After scraping subsection, update tracker to next
-            sectionCounter += 1
+        if not artentryID :
+            cursor.execute("INSERT INTO artentry(name, date) VALUES(%s,%s)", (name, date))
+            cursor.execute("SELECT id FROM artentry WHERE name = '%s' AND date = '%s';", (name, date))
+            artentryID = cursor.fetchone()
+
+    # Check if IMAGE exists in database                        
+    for artwork in artworkList: 
+        cursor.execute("SELECT id FROM image WHERE alt = '%s';", (artwork.getAlt()))
+        imageID = cursor.fetchone()
+
+        if not imageID:
+            
+            # Grabs href for full-res image webpage from thumbnail container
+                    # href = /File:ARTORK_NAME
+            newURL = f"https://jojowiki.com{artwork.getSrc()}" # Appends href to domain to form new url
+
+            # Temporary HTML parser to scrape full-res image
+            newRequests_session = requests.Session()
+            newPage = newRequests_session.get( newURL )  
+            newSoup = BeautifulSoup(newPage.text, "lxml")
+
+            media = newSoup.find("a", {"class":"internal"})
+            src = media.get('href') # Grabs image source-link
+            alt = media.get('title') # Grabs image alt text
+
+            cursor.execute("INSERT INTO image(artentry_id, url, alt) VALUES(%s,%s,%s)", (artentryID, src, alt))
+
+    # Check if IMAGE exists in database                        
+    for artwork in sourceImgList: 
+        cursor.execute("SELECT id FROM source WHERE alt = '%s';", (artwork.getAlt()))
+        imageID = cursor.fetchone()
+
+        if not imageID:
+
+            # Grabs href for full-res image webpage from thumbnail container
+                    # href = /File:ARTORK_NAME
+            newURL = f"https://jojowiki.com{artwork.getSrc()}" # Appends href to domain to form new url
+
+            # Temporary HTML parser to scrape full-res image
+            newRequests_session = requests.Session()
+            newPage = newRequests_session.get( newURL )  
+            newSoup = BeautifulSoup(newPage.text, "lxml")
+
+            media = newSoup.find("a", {"class":"internal"})
+            src = media.get('href') # Grabs image source-link
+            alt = media.get('title') # Grabs image alt text
+
+            cursor.execute("INSERT INTO source(artentry_id, url, alt) VALUES(%s,%s,%s)", (artentryID, src, alt))
+    
+    LIMIT -=1
+    if LIMIT == 0 :
+        break
         
-        # Appends artEntry to list allArtEntries
-        artEntryObj.date = date
-        artEntryObj.sourceTitle = sourceTitle
-        allArtEntries.append(artEntryObj)
 
-        # Writes to csv file, formatting the image lists into formatted strings
-        writer.writerow([formatImgList(artworkList), date, sourceTitle, formatImgList(sourceImgList)])
-        pickle.dump(allArtEntries, open("artEntriesData.p", "wb"))
+conn.close()
