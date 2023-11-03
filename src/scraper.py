@@ -38,7 +38,8 @@ cursor.execute("SET client_encoding = 'UTF8'")
 # GET Request
 URL =  'https://jojowiki.com/Art_Gallery#2021-2025-0'
 requests_session = requests.Session()
-page = requests_session.get( URL )  
+headers = {"User-Agent": "Mozilla/5.0 (X11; CrOS x86_64 12871.102.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.141 Safari/537.36"}
+page = requests_session.get( URL , headers=headers )  
 
 # Check for successful status code (200)
 print("Status Code - {}".format(page.status_code))
@@ -50,7 +51,6 @@ divs = soup.find("div", {"class":"phantom-blood-tabs"})
 entries = divs.find_all("table", {"class":"diamonds volume"})
 
 # Scrapes every artwork entry on the page
-LIMIT = 10
 for entry in entries:
 
     # Initializes each subsection of an artwork entry, containing:
@@ -107,7 +107,6 @@ for entry in entries:
 
     # Check if IMAGE exists in database                        
     for artwork in artworkList: 
-        print(artwork.getAlt())
         cursor.execute("SELECT id FROM image WHERE alt = %s;", (artwork.getAlt(),))
         imageID = cursor.fetchone()
 
@@ -119,21 +118,27 @@ for entry in entries:
 
             # Temporary HTML parser to scrape full-res image
             newRequests_session = requests.Session()
-            newPage = newRequests_session.get( newURL )  
+            newPage = newRequests_session.get( newURL , headers=headers)  
             newSoup = BeautifulSoup(newPage.text, "lxml")
 
             media = newSoup.find("a", {"class":"internal"})
             src = media.get('href') # Grabs image source-link
             alt = media.get('title') # Grabs image alt text
+            
+            cursor.execute("SELECT id FROM image WHERE alt = %s;", (alt,))
+            imageID = cursor.fetchone()
 
-            cursor.execute("INSERT INTO image(artentry_id, url, alt) VALUES(%s,%s,%s)", (artentryID, src, alt))
+            if not imageID :
+                print(f"Inserting into image, {alt} for artentry: {artentryID}")
+                cursor.execute("INSERT INTO image(artentry_id, url, alt) VALUES(%s,%s,%s)", (artentryID, src, alt))
 
     # Check if IMAGE exists in database                        
     for artwork in sourceImgList: 
         cursor.execute("SELECT id FROM source WHERE alt = %s;", (artwork.getAlt(),))
-        imageID = cursor.fetchone()
+        sourceID = cursor.fetchone()
+        print(f"SourceID: {sourceID}")
 
-        if not imageID:
+        if not sourceID:
 
             # Grabs href for full-res image webpage from thumbnail container
                     # href = /File:ARTORK_NAME
@@ -141,18 +146,19 @@ for entry in entries:
 
             # Temporary HTML parser to scrape full-res image
             newRequests_session = requests.Session()
-            newPage = newRequests_session.get( newURL )  
+            newPage = newRequests_session.get( newURL , headers=headers)  
             newSoup = BeautifulSoup(newPage.text, "lxml")
 
             media = newSoup.find("a", {"class":"internal"})
             src = media.get('href') # Grabs image source-link
             alt = media.get('title') # Grabs image alt text
 
-            cursor.execute("INSERT INTO source(artentry_id, url, alt) VALUES(%s,%s,%s)", (artentryID, src, alt))
+            cursor.execute("SELECT id FROM source WHERE alt = %s;", (alt,))
+            sourceID = cursor.fetchone()
+            if not sourceID :
+                print(f"Inserting into source, {alt} for artentry: {artentryID}")
+                cursor.execute("INSERT INTO source(artentry_id, url, alt) VALUES(%s,%s,%s)", (artentryID, src, alt))
     
-    LIMIT -=1
-    if LIMIT == 0 :
-        break
         
 
 conn.close()
