@@ -36,7 +36,7 @@ cursor = conn.cursor()
 cursor.execute("SET client_encoding = 'UTF8'")
 
 # GET Request
-URL =  'https://jojowiki.com/Art_Gallery#1970-1990-0'
+URL =  'https://jojowiki.com/Art_Gallery#2021-2025-0'
 requests_session = requests.Session()
 page = requests_session.get( URL )  
 
@@ -70,7 +70,7 @@ for entry in entries:
     for sectionIndex, section in enumerate(sections) :
 
         # If on a subsection containing images (1 and 4), scrape image content
-        if(sectionIndex == 1 or sectionIndex == 4) :
+        if(sectionIndex == 0 or sectionIndex == 3) :
             thumbnails = section.find_all("a") # href is stored within <a> tags
 
             # For every thumbnail image, find full-res webpage and create new 
@@ -79,33 +79,36 @@ for entry in entries:
 
                 img = thumbnail.find("img")
                 alt = img.get('alt')
-                if(sectionIndex == 1):
+                if(sectionIndex == 0):
                     artworkList.append(Artwork(href, alt))
-                elif(sectionIndex == 4) :
+                elif(sectionIndex == 3) :
                     sourceImgList.append(Artwork(href, alt))
 
         # If on a subsection containing text (2 and 3), scrape text content
-        elif(sectionIndex == 2 or sectionIndex == 3) :
+        elif(sectionIndex == 1 or sectionIndex == 2) :
             textContent = section.find("center") # Text content is stored within <center> tags
 
             for string in textContent.strings :
-                if(sectionIndex == 2) :
+                if(sectionIndex == 1) :
                     date += string
-                elif(sectionIndex == 3) :
+                elif(sectionIndex == 2) :
                     name += string
     
     # Check if ARTENTRY exists in database
-        cursor.execute("SELECT id FROM artentry WHERE name = '%s' AND date = '%s';", (name, date))
-        artentryID = cursor.fetchone()
 
-        if not artentryID :
-            cursor.execute("INSERT INTO artentry(name, date) VALUES(%s,%s)", (name, date))
-            cursor.execute("SELECT id FROM artentry WHERE name = '%s' AND date = '%s';", (name, date))
-            artentryID = cursor.fetchone()
+    cursor.execute("SELECT id FROM artentry WHERE name = %s AND date = %s;", (name, date))
+    artentryID = cursor.fetchone()
+
+    if not artentryID :
+        print(f"Inserting into artentry, {name} for date: {date}")
+        cursor.execute("INSERT INTO artentry(name, date) VALUES(%s,%s)", (name, date))
+        cursor.execute("SELECT id FROM artentry WHERE name = %s AND date = %s;", (name, date))
+        artentryID = cursor.fetchone()
 
     # Check if IMAGE exists in database                        
     for artwork in artworkList: 
-        cursor.execute("SELECT id FROM image WHERE alt = '%s';", (artwork.getAlt()))
+        print(artwork.getAlt())
+        cursor.execute("SELECT id FROM image WHERE alt = %s;", (artwork.getAlt(),))
         imageID = cursor.fetchone()
 
         if not imageID:
@@ -127,7 +130,7 @@ for entry in entries:
 
     # Check if IMAGE exists in database                        
     for artwork in sourceImgList: 
-        cursor.execute("SELECT id FROM source WHERE alt = '%s';", (artwork.getAlt()))
+        cursor.execute("SELECT id FROM source WHERE alt = %s;", (artwork.getAlt(),))
         imageID = cursor.fetchone()
 
         if not imageID:
