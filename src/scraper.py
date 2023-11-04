@@ -4,6 +4,7 @@ import lxml
 import urllib3
 import requests
 import psycopg2
+import re
 from bs4 import BeautifulSoup 
 
 class Artwork:
@@ -75,14 +76,29 @@ for entry in entries:
 
             # For every thumbnail image, find full-res webpage and create new 
             for thumbnail in thumbnails :
-                href = thumbnail.get('href')
+                imgTag = thumbnail.find('img')
+                artworkData = imgTag.get('src')
+                src = ""
+                alt = ""
 
-                img = thumbnail.find("img")
-                alt = img.get('alt')
+                # Extract src
+                src_match = re.search(r'(.+?\.(jpg|png))/', artworkData)  # Capture everything until the first ".jpg" or ".png" and the following "/"
+                if src_match:
+                    src = src_match.group(1)
+                    # Remove "/thumb" if it exists
+                    src = src.replace("/thumb/", "/")
+
+                # Extract alt
+                alt_match = re.search(r'([^/]+)$', src)  # Capture everything after the last "/"                
+                if alt_match:
+                    alt = alt_match.group(1)
+                    # Replace underscores with spaces in alt
+                    # alt = alt.replace("_", " ")
+
                 if(sectionIndex == 0):
-                    artworkList.append(Artwork(href, alt))
+                    artworkList.append(Artwork(src, alt))
                 elif(sectionIndex == 3) :
-                    sourceImgList.append(Artwork(href, alt))
+                    sourceImgList.append(Artwork(src, alt))
 
         # If on a subsection containing text (2 and 3), scrape text content
         elif(sectionIndex == 1 or sectionIndex == 2) :
@@ -95,7 +111,6 @@ for entry in entries:
                     name += string
     
     # Check if ARTENTRY exists in database
-
     cursor.execute("SELECT id FROM artentry WHERE name = %s AND date = %s;", (name, date))
     artentryID = cursor.fetchone()
 
@@ -105,60 +120,25 @@ for entry in entries:
         cursor.execute("SELECT id FROM artentry WHERE name = %s AND date = %s;", (name, date))
         artentryID = cursor.fetchone()
 
+
     # Check if IMAGE exists in database                        
     for artwork in artworkList: 
         cursor.execute("SELECT id FROM image WHERE alt = %s;", (artwork.getAlt(),))
         imageID = cursor.fetchone()
 
         if not imageID:
-            
-            # Grabs href for full-res image webpage from thumbnail container
-                    # href = /File:ARTORK_NAME
-            newURL = f"https://jojowiki.com{artwork.getSrc()}" # Appends href to domain to form new url
+            print(f"Inserting into image, {artwork.getAlt()} for artentry: {artentryID}")
+            cursor.execute("INSERT INTO image(artentry_id, url, alt) VALUES(%s,%s,%s)", (artentryID, artwork.getSrc(), artwork.getAlt()))
 
-            # Temporary HTML parser to scrape full-res image
-            newRequests_session = requests.Session()
-            newPage = newRequests_session.get( newURL , headers=headers)  
-            newSoup = BeautifulSoup(newPage.text, "lxml")
 
-            media = newSoup.find("a", {"class":"internal"})
-            src = media.get('href') # Grabs image source-link
-            alt = media.get('title') # Grabs image alt text
-            
-            cursor.execute("SELECT id FROM image WHERE alt = %s;", (alt,))
-            imageID = cursor.fetchone()
-
-            if not imageID :
-                print(f"Inserting into image, {alt} for artentry: {artentryID}")
-                cursor.execute("INSERT INTO image(artentry_id, url, alt) VALUES(%s,%s,%s)", (artentryID, src, alt))
-
-    # Check if IMAGE exists in database                        
+    # Check if SOURCE exists in database                        
     for artwork in sourceImgList: 
         cursor.execute("SELECT id FROM source WHERE alt = %s;", (artwork.getAlt(),))
         sourceID = cursor.fetchone()
-        print(f"SourceID: {sourceID}")
+        #print(f"SourceID: {sourceID}")
 
         if not sourceID:
-
-            # Grabs href for full-res image webpage from thumbnail container
-                    # href = /File:ARTORK_NAME
-            newURL = f"https://jojowiki.com{artwork.getSrc()}" # Appends href to domain to form new url
-
-            # Temporary HTML parser to scrape full-res image
-            newRequests_session = requests.Session()
-            newPage = newRequests_session.get( newURL , headers=headers)  
-            newSoup = BeautifulSoup(newPage.text, "lxml")
-
-            media = newSoup.find("a", {"class":"internal"})
-            src = media.get('href') # Grabs image source-link
-            alt = media.get('title') # Grabs image alt text
-
-            cursor.execute("SELECT id FROM source WHERE alt = %s;", (alt,))
-            sourceID = cursor.fetchone()
-            if not sourceID :
-                print(f"Inserting into source, {alt} for artentry: {artentryID}")
-                cursor.execute("INSERT INTO source(artentry_id, url, alt) VALUES(%s,%s,%s)", (artentryID, src, alt))
-    
-        
+            print(f"Inserting into source, {artwork.getAlt()} for artentry: {artentryID}")
+            cursor.execute("INSERT INTO source(artentry_id, url, alt) VALUES(%s,%s,%s)", (artentryID, artwork.getSrc(), artwork.getAlt()))
 
 conn.close()
